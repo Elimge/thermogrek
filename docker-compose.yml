@@ -31,6 +31,22 @@ services:
       timeout: 5s
       retries: 5
 
+  simulator:
+    build:
+      context: ./simulator
+      dockerfile: Dockerfile
+    container_name: thermogrek-simulator
+    restart: unless-stopped
+    environment:
+      MQTT_HOST: mqtt-broker
+      MQTT_PORT: 1883
+      PUBLISH_INTERVAL_SEC: 1.0
+      DEGRADATION_RATE: 0.1
+    depends_on:
+      - mqtt-broker
+    networks:
+      - thermogrek-net
+
 networks:
   thermogrek-net:
     driver: bridge
