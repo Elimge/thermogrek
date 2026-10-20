@@ -93,6 +93,22 @@ services:
     networks:
       - thermogrek-net
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: thermogrek-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-5174}:5173"
+    environment:
+      VITE_API_URL: http://127.0.0.1:8001
+      VITE_WS_URL: ws://127.0.0.1:8001/ws/telemetry
+    depends_on:
+      - backend
+    networks:
+      - thermogrek-net
+
 networks:
   thermogrek-net:
     driver: bridge
