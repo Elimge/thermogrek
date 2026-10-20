@@ -69,6 +69,30 @@ services:
     networks:
       - thermogrek-net
 
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: thermogrek-backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${API_PORT:-8001}:8000"
+    environment:
+      POSTGRES_HOST: database
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-thermogrek_db}
+      POSTGRES_USER: ${POSTGRES_USER:-thermogrek_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-thermogrek_dev_pass_secure_2026}
+      MQTT_HOST: mqtt-broker
+      MQTT_PORT: 1883
+    depends_on:
+      database:
+        condition: service_healthy
+      mqtt-broker:
+        condition: service_started
+    networks:
+      - thermogrek-net
+
 networks:
   thermogrek-net:
     driver: bridge
