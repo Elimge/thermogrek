@@ -18,6 +18,12 @@ running = True
 cfg = IngestionConfig()
 repo = DatabaseRepository(cfg.db_conn_info)
 
+# In-memory tracking of previous asset status to prevent Alarm Flooding (ISA-18.2)
+previous_asset_states = {
+    "HE-01": "NORMAL",
+    "CT-01": "NORMAL"
+}
+
 def handle_shutdown(signum, frame):
     global running
     logger.info("Received termination signal (%d). Shutting down ingestion service...", signum)
@@ -38,7 +44,7 @@ def on_message(client, userdata, msg):
         raw_payload = json.loads(msg.payload.decode("utf-8"))
         envelope = TelemetryEnvelope(**raw_payload)
         
-        # Dispatch to thermodynamic evaluation depending on asset type
+        # Dispatch evaluation
         if envelope.asset_id == "HE-01":
             metrics = HeatExchangerMetrics(**envelope.metrics)
             kpi = KPIEngine.evaluate_heat_exchanger(envelope.asset_id, envelope.timestamp, metrics)
@@ -49,21 +55,35 @@ def on_message(client, userdata, msg):
             logger.warning("Unrecognized asset ID: %s", envelope.asset_id)
             return
 
-        # Persist everything in PostgreSQL
+        # Anti-Flooding State Transition Logic (Edge-Triggered Alarms)
+        last_state = previous_asset_states.get(envelope.asset_id, "NORMAL")
+        current_state = kpi.health_status
+
+        # Only insert alarm if transitioning to an abnormal state (NORMAL -> WARNING, WARNING -> CRITICAL)
+        if current_state != last_state and current_state in ("WARNING", "CRITICAL"):
+            previous_asset_states[envelope.asset_id] = current_state
+            logger.warning(
+                "STATE TRANSITION on %s: %s -> %s | Raising Alarm: %s",
+                envelope.asset_id, last_state, current_state, kpi.alarm_triggered["alarm_code"]
+            )
+        else:
+            # Suppress redundant repetitive alarm insertion while remaining in same state
+            kpi.alarm_triggered = None
+            if current_state == "NORMAL":
+                previous_asset_states[envelope.asset_id] = "NORMAL"
+
+        # Persist reading and KPIs
         repo.save_reading_and_kpis(envelope, kpi)
 
-        # Broadcast calculated KPIs to MQTT for downstream WebSocket API
+        # Broadcast calculated KPIs to MQTT for WebSocket clients
         kpi_topic = f"thermogrek/plants/main/assets/{envelope.asset_id}/kpis"
         client.publish(kpi_topic, kpi.model_dump_json(), qos=1)
-
-        if kpi.alarm_triggered:
-            logger.warning("ALARM TRIGGERED on %s: %s", envelope.asset_id, kpi.alarm_triggered["message"])
 
     except Exception as e:
         logger.error("Error processing MQTT message on %s: %s", msg.topic, e, exc_info=True)
 
 def main():
-    logger.info("Starting ThermoGrek IoT Ingestion Service...")
+    logger.info("Starting ThermoGrek IoT Ingestion Service with Anti-Flooding logic...")
     repo.open()
 
     client = mqtt.Client(
