@@ -59,3 +59,7 @@ dist-ssr/
 
 # Devcontainer logs
 .devcontainer/*/local-data
+
+# Database dumps & operational backups
+backups/
+*.sql.gz
